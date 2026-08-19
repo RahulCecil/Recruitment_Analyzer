@@ -31,19 +31,40 @@ application_evaluations = Table(
 
 
 def _rounded_average(column: Any) -> Any:
-    return func.round(cast(func.avg(column), Numeric), 3)
+    return cast(func.round(cast(func.avg(column), Numeric(10, 3)), 3), Numeric)
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
     values = dict(getattr(row, "_mapping", row))
     return {
-        key: float(value) if isinstance(value, Decimal) else value
+        key: float(value) if isinstance(value, (Decimal, float, int)) else value
         for key, value in values.items()
     }
 
 
 def overview_kpis(db: Session) -> dict[str, Any]:
     view = application_evaluations
+
+    # 1. Condition: Rule scorer accuracy (threshold >= 0.5 matches ground truth)
+    rule_accuracy_case = case(
+        (
+            ((view.c.rule_score >= 0.5) & (view.c.is_positive_outcome == 1))
+            | ((view.c.rule_score < 0.5) & (view.c.is_positive_outcome == 0)),
+            1,
+        ),
+        else_=0,
+    )
+
+    # 2. Condition: LLM scorer accuracy (threshold >= 0.5 matches ground truth)
+    llm_accuracy_case = case(
+        (
+            ((view.c.llm_score_norm >= 0.5) & (view.c.is_positive_outcome == 1))
+            | ((view.c.llm_score_norm < 0.5) & (view.c.is_positive_outcome == 0)),
+            1,
+        ),
+        else_=0,
+    )
+
     statement = select(
         func.count().label("total_applications"),
         _rounded_average(view.c.is_positive_outcome).label("positive_outcome_rate"),
@@ -51,13 +72,15 @@ def overview_kpis(db: Session) -> dict[str, Any]:
             "disagreement_rate"
         ),
         _rounded_average(view.c.rule_score).label("avg_rule_score"),
+        _rounded_average(rule_accuracy_case).label("rule_accuracy"),
         _rounded_average(view.c.llm_score_norm).label("avg_llm_score"),
+        _rounded_average(llm_accuracy_case).label("llm_accuracy"),
     ).where(view.c.recruiter_decision.is_not(None))
     row = db.execute(statement).mappings().one()
     result = _row_dict(row)
     for key, value in result.items():
-        if key != "total_applications":
-            result[key] = float(value or 0.0)
+        if key != "total_applications" and value is not None:
+            result[key] = float(value)
     return result
 
 

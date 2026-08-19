@@ -50,7 +50,7 @@ with tab_overview:
 
     kpis = fetch_json("/api/overview/kpis") or {}
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
     m1.metric("Evaluated Apps", kpis.get("total_applications", 0))
     m2.metric(
         "Positive Outcome Rate",
@@ -61,7 +61,17 @@ with tab_overview:
         f"{round(kpis.get('disagreement_rate', 0.0) * 100, 1)}%",
     )
     m4.metric("Avg Rule Score", kpis.get("avg_rule_score", 0.0))
-    m5.metric("Avg LLM Score (Norm)", kpis.get("avg_llm_score", 0.0))
+    m5.metric(
+        "Rule Accuracy",
+        f"{round(kpis.get('rule_accuracy', 0.0) * 100, 1)}%",
+        help="Percentage of predictions (>= 0.5) matching actual recruiter decisions.",
+    )
+    m6.metric("Avg LLM Score (Norm)", kpis.get("avg_llm_score", 0.0))
+    m7.metric(
+        "LLM Accuracy",
+        f"{round(kpis.get('llm_accuracy', 0.0) * 100, 1)}%",
+        help="Percentage of predictions (>= 0.5) matching actual recruiter decisions.",
+    )
 
     st.divider()
 
