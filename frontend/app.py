@@ -57,8 +57,9 @@ with tab_overview:
         f"{round(kpis.get('positive_outcome_rate', 0.0) * 100, 1)}%",
     )
     m3.metric(
-        "Score Disagreement Rate",
-        f"{round(kpis.get('disagreement_rate', 0.0) * 100, 1)}%",
+        "Classification Disagreement",
+        f"{round(kpis.get('classification_disagreement_rate', 0.0) * 100, 1)}%",
+        help="Share of evaluated applications where one score is at least 0.5 and the other is below 0.5.",
     )
     m4.metric("Avg Rule Score", kpis.get("avg_rule_score", 0.0))
     m5.metric(
@@ -72,6 +73,27 @@ with tab_overview:
         f"{round(kpis.get('llm_accuracy', 0.0) * 100, 1)}%",
         help="Percentage of predictions (>= 0.5) matching actual recruiter decisions.",
     )
+
+    st.caption(
+        f"Large score-gap rate (>0.4): {round(kpis.get('large_score_gap_rate', 0.0) * 100, 1)}%. "
+        "All evaluation metrics exclude pending applications."
+    )
+
+    metric_rows = []
+    for name, key in [("Rule-based", "rule_metrics"), ("LLM-based", "llm_metrics")]:
+        metrics = kpis.get(key, {})
+        metric_rows.append(
+            {
+                "System": name,
+                "Balanced accuracy": metrics.get("balanced_accuracy", 0.0),
+                "MCC": metrics.get("mcc", 0.0),
+                "Accuracy 95% CI": (
+                    f"{metrics.get('accuracy_ci_low', 0.0) * 100:.1f}% - "
+                    f"{metrics.get('accuracy_ci_high', 0.0) * 100:.1f}%"
+                ),
+            }
+        )
+    st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -99,8 +121,10 @@ with tab_overview:
             st.info("No distribution data returned.")
 
     with col_right:
-        st.subheader("LLM Upgrade Impact (v1 vs. v2)")
-        st.caption("Comparing accuracy before and after model version release.")
+        st.subheader("Model-Version Comparison")
+        st.caption(
+            "Version-level differences are observational and may reflect different application mixes."
+        )
 
         version_data = fetch_json("/api/overview/model-versions")
         if version_data:
@@ -108,7 +132,7 @@ with tab_overview:
             st.dataframe(df_version, use_container_width=True, hide_index=True)
             st.bar_chart(
                 df_version.set_index("llm_model_version")[
-                    ["avg_llm_score", "avg_rule_score"]
+                    ["rule_accuracy", "llm_accuracy"]
                 ]
             )
         else:
@@ -169,7 +193,7 @@ with tab_drilldown:
 
     st.subheader("Disagreement Case Inspector")
     st.caption(
-        "Individual application instances where Rule Scorer and LLM Scorer disagree significantly."
+        "Individual applications with a score gap greater than 0.4; this is separate from binary classification disagreement."
     )
 
     disagree_data = fetch_json(

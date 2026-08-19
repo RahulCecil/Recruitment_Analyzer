@@ -31,3 +31,13 @@ This repository contains a Streamlit dashboard for evaluating how an LLM-based r
 ## Notes
 
 This keeps the stack focused on Python + PostgreSQL + Streamlit while maintaining clear separation between database access, evaluation logic, and the dashboard presentation layer.
+
+## Validate the analysis
+
+The report's core metrics can be independently recomputed from the source CSVs without installing extra packages:
+
+```text
+python scripts/validate_analysis.py
+```
+
+The script checks primary-key and foreign-key integrity, excludes pending decisions, and reports confusion matrices, balanced accuracy, MCC, version-level results, and both disagreement definitions.

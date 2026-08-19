@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from math import sqrt
 from typing import Any
 
 from sqlalchemy import Column, Float, Integer, Numeric, String, Table, case, cast, func, select
@@ -31,56 +32,118 @@ application_evaluations = Table(
 
 
 def _rounded_average(column: Any) -> Any:
-    return cast(func.round(cast(func.avg(column), Numeric(10, 3)), 3), Numeric)
+    return func.round(cast(func.avg(column), Numeric(10, 3)), 3)
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
     values = dict(getattr(row, "_mapping", row))
     return {
-        key: float(value) if isinstance(value, (Decimal, float, int)) else value
+        key: float(value) if isinstance(value, (Decimal, float)) else value
         for key, value in values.items()
+    }
+
+
+def _wilson_interval(successes: int, total: int) -> tuple[float, float]:
+    if not total:
+        return 0.0, 0.0
+    proportion = successes / total
+    z = 1.96
+    denominator = 1 + z**2 / total
+    centre = (proportion + z**2 / (2 * total)) / denominator
+    margin = (
+        z
+        * sqrt(
+            proportion * (1 - proportion) / total
+            + z**2 / (4 * total**2)
+        )
+        / denominator
+    )
+    return max(0.0, centre - margin), min(1.0, centre + margin)
+
+
+def _classification_metrics(
+    db: Session, score_column: Any, extra_filters: tuple[Any, ...] = ()
+) -> dict[str, Any]:
+    view = application_evaluations
+    statement = select(
+        func.sum(
+            case(((score_column >= 0.5) & (view.c.is_positive_outcome == 1), 1)),
+            else_=0,
+        ).label("tp"),
+        func.sum(
+            case(((score_column < 0.5) & (view.c.is_positive_outcome == 0), 1)),
+            else_=0,
+        ).label("tn"),
+        func.sum(
+            case(((score_column >= 0.5) & (view.c.is_positive_outcome == 0), 1)),
+            else_=0,
+        ).label("fp"),
+        func.sum(
+            case(((score_column < 0.5) & (view.c.is_positive_outcome == 1), 1)),
+            else_=0,
+        ).label("fn"),
+    ).where(view.c.recruiter_decision.is_not(None), *extra_filters)
+    row = db.execute(statement).mappings().one()
+    tp = int(row["tp"] or 0)
+    tn = int(row["tn"] or 0)
+    fp = int(row["fp"] or 0)
+    fn = int(row["fn"] or 0)
+    total = tp + tn + fp + fn
+    accuracy = (tp + tn) / total if total else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    specificity = tn / (tn + fp) if tn + fp else 0.0
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    balanced_accuracy = (recall + specificity) / 2
+    denominator = sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = (tp * tn - fp * fn) / denominator if denominator else 0.0
+    ci_low, ci_high = _wilson_interval(tp + tn, total)
+    return {
+        "total_applications": total,
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "correct": tp + tn,
+        "incorrect": fp + fn,
+        "accuracy": round(accuracy, 3),
+        "accuracy_ci_low": round(ci_low, 3),
+        "accuracy_ci_high": round(ci_high, 3),
+        "precision": round(precision, 3),
+        "recall": round(recall, 3),
+        "specificity": round(specificity, 3),
+        "balanced_accuracy": round(balanced_accuracy, 3),
+        "mcc": round(mcc, 3),
     }
 
 
 def overview_kpis(db: Session) -> dict[str, Any]:
     view = application_evaluations
-
-    # 1. Condition: Rule scorer accuracy (threshold >= 0.5 matches ground truth)
-    rule_accuracy_case = case(
-        (
-            ((view.c.rule_score >= 0.5) & (view.c.is_positive_outcome == 1))
-            | ((view.c.rule_score < 0.5) & (view.c.is_positive_outcome == 0)),
-            1,
-        ),
-        else_=0,
-    )
-
-    # 2. Condition: LLM scorer accuracy (threshold >= 0.5 matches ground truth)
-    llm_accuracy_case = case(
-        (
-            ((view.c.llm_score_norm >= 0.5) & (view.c.is_positive_outcome == 1))
-            | ((view.c.llm_score_norm < 0.5) & (view.c.is_positive_outcome == 0)),
-            1,
-        ),
-        else_=0,
-    )
-
+    rule_metrics = _classification_metrics(db, view.c.rule_score)
+    llm_metrics = _classification_metrics(db, view.c.llm_score_norm)
     statement = select(
         func.count().label("total_applications"),
         _rounded_average(view.c.is_positive_outcome).label("positive_outcome_rate"),
         _rounded_average(case((view.c.score_delta > 0.4, 1), else_=0)).label(
-            "disagreement_rate"
+            "large_score_gap_rate"
         ),
+        _rounded_average(
+            case(
+                (
+                    (view.c.rule_score >= 0.5)
+                    != (view.c.llm_score_norm >= 0.5),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("classification_disagreement_rate"),
         _rounded_average(view.c.rule_score).label("avg_rule_score"),
-        _rounded_average(rule_accuracy_case).label("rule_accuracy"),
         _rounded_average(view.c.llm_score_norm).label("avg_llm_score"),
-        _rounded_average(llm_accuracy_case).label("llm_accuracy"),
     ).where(view.c.recruiter_decision.is_not(None))
-    row = db.execute(statement).mappings().one()
-    result = _row_dict(row)
-    for key, value in result.items():
-        if key != "total_applications" and value is not None:
-            result[key] = float(value)
+    result = _row_dict(db.execute(statement).mappings().one())
+    result["rule_accuracy"] = rule_metrics["accuracy"]
+    result["llm_accuracy"] = llm_metrics["accuracy"]
+    result["rule_metrics"] = rule_metrics
+    result["llm_metrics"] = llm_metrics
     return result
 
 
@@ -113,7 +176,18 @@ def model_versions(db: Session) -> list[dict[str, Any]]:
         .group_by(view.c.llm_model_version)
         .order_by(view.c.llm_model_version)
     )
-    return [_row_dict(row) for row in db.execute(statement).mappings().all()]
+    results = []
+    for row in db.execute(statement).mappings().all():
+        result = _row_dict(row)
+        filters = (view.c.llm_model_version == row["llm_model_version"],)
+        result["rule_accuracy"] = _classification_metrics(
+            db, view.c.rule_score, filters
+        )["accuracy"]
+        result["llm_accuracy"] = _classification_metrics(
+            db, view.c.llm_score_norm, filters
+        )["accuracy"]
+        results.append(result)
+    return results
 
 
 def _segment_filters(
@@ -154,7 +228,37 @@ def segment_analytics(
         _rounded_average(view.c.rule_score).label("avg_rule_score"),
         _rounded_average(view.c.llm_score_norm).label("avg_llm_score"),
         _rounded_average(view.c.score_delta).label("avg_disagreement_delta"),
-        _rounded_average(view.c.is_positive_outcome).label("hire_rate"),
+        _rounded_average(view.c.is_positive_outcome).label("positive_outcome_rate"),
+        _rounded_average(
+            case((view.c.rule_score >= 0.5, 1), else_=0)
+        ).label("rule_positive_rate"),
+        _rounded_average(
+            case((view.c.llm_score_norm >= 0.5, 1), else_=0)
+        ).label("llm_positive_rate"),
+        _rounded_average(
+            case(
+                (
+                    (
+                        ((view.c.rule_score >= 0.5) & (view.c.is_positive_outcome == 1))
+                        | ((view.c.rule_score < 0.5) & (view.c.is_positive_outcome == 0))
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("rule_accuracy"),
+        _rounded_average(
+            case(
+                (
+                    (
+                        ((view.c.llm_score_norm >= 0.5) & (view.c.is_positive_outcome == 1))
+                        | ((view.c.llm_score_norm < 0.5) & (view.c.is_positive_outcome == 0))
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("llm_accuracy"),
     )
     statement = _segment_filters(
         statement, job_family, country, model_version, min_profile_completeness

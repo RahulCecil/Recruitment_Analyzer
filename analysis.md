@@ -25,6 +25,11 @@ Both systems are evaluated as binary classifiers using a threshold of 0.5. The r
 
 The evaluated data is nearly balanced between positive and negative outcomes, so accuracy has a meaningful baseline: an always-positive or always-negative classifier would be about 52.3% or 47.7% accurate respectively.
 
+Two different disagreement measures are used below and should not be conflated:
+
+- Large score-gap rate: absolute score difference greater than 0.4.
+- Classification disagreement: one score is at least 0.5 and the other is below 0.5.
+
 ### Score distributions
 
 | Statistic | Rule score | LLM score (normalized) |
@@ -46,9 +51,11 @@ The LLM scores are shifted materially higher than rule scores. The mean absolute
 | Rule-based | **65.03%** | 3,574 | 1,922 | 67.22% | 64.74% | 65.34% |
 | LLM-based | **62.05%** | 3,410 | 2,086 | 58.95% | 90.44% | 30.88% |
 
+Balanced accuracy is 65.04% for the rule system and 60.66% for the LLM. Matthews correlation coefficient is 0.301 and 0.268 respectively. Approximate 95% Wilson confidence intervals for accuracy are 63.8%-66.3% for the rule system and 60.8%-63.3% for the LLM.
+
 The rule-based system is 2.98 percentage points more accurate overall. Its errors are more balanced: it produces 908 false positives and 1,014 false negatives. The LLM is much more sensitive to positive outcomes, producing 2,601 true positives and only 275 false negatives, but it also produces 1,811 false positives. This explains its high recall and low specificity. At this threshold, the LLM behaves more like a broad screening or recall-oriented system, while the rule system is the better balanced classifier.
 
-The two systems agree on 4,412 of 5,496 evaluated applications (80.3%). They disagree on 1,084 applications (19.7%), which is consistent with the observed score separation and is large enough to warrant review rather than treating the scores as interchangeable.
+The two systems make the same binary classification on 3,460 of 5,496 evaluated applications (63.0%). They disagree on 2,036 applications (37.0%). Separately, 1,024 applications (18.6%) have an absolute score gap greater than 0.4. Both measures are large enough to warrant review rather than treating the scores as interchangeable.
 
 ### LLM model-version comparison
 
@@ -82,7 +89,11 @@ These are model-performance disparities by job family, not a definitive fairness
 ## Conclusions and next checks
 
 1. Against the current recruiter-derived ground truth, the rule system is more accurate: **65.03% versus 62.05%** for the LLM.
-2. The LLM has substantially higher recall (**90.44%**) but much lower specificity (**30.88%**), making it suitable only for a recall-first workflow unless its threshold is recalibrated.
+2. At the evaluated threshold, the LLM has substantially higher recall (**90.44%**) but much lower specificity (**30.88%**), making it more appropriate for a recall-first workflow unless its threshold is recalibrated.
 3. The Healthcare rule-score distribution is anomalous and should be investigated first. Check feature availability, family-specific normalization, and rule thresholds for Healthcare jobs.
 4. Re-evaluate thresholds separately from accuracy. Report precision-recall trade-offs, calibration, and family-level false-positive and false-negative rates rather than relying on one global 0.5 threshold.
 5. Treat recruiter decisions as a noisy label. A future audit should include independent review or outcome-based validation, and should stratify by country, seniority, model version, and job family together.
+
+## Reproducibility and data-quality notes
+
+The backend now exposes the metric definitions used here through `/api/overview/kpis`, including confusion matrices, balanced accuracy, MCC, and Wilson intervals. Re-run the repository validation script after changing the CSV inputs or database view. The dataset contains a clear rule-configuration artifact: every Healthcare application is labeled `low` by the rule scorer, so the Healthcare result should be treated as a configuration/data-generation defect until independently verified.
