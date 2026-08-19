@@ -24,7 +24,7 @@ def compute_summary(db: Session) -> dict[str, Any]:
         "interviewed": interviewed,
         "rejected": rejected,
         "average_rule_score": round(float(average_rule), 3),
-        "average_llm_score": round(float(average_llm), 3),
+        "average_llm_score": round(float(average_llm) / 100, 3),
     }
 
 
@@ -32,7 +32,7 @@ def compare_tool_performance(db: Session) -> list[dict[str, Any]]:
     stmt = (
         select(
             Application.llm_model_version,
-            func.avg(Application.llm_score).label("avg_llm_score"),
+            (func.avg(Application.llm_score) / 100).label("avg_llm_score"),
             func.avg(Application.rule_score).label("avg_rule_score"),
             func.count(Application.application_id).label("count"),
         )

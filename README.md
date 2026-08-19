@@ -6,7 +6,7 @@ This repository contains a Streamlit dashboard for evaluating how an LLM-based r
 
 - Database layer: PostgreSQL tables seeded from the provided CSVs
 - Python backend layer: SQLAlchemy models and evaluation logic for summary and performance analysis
-- Frontend layer: Streamlit dashboard that reads directly from PostgreSQL
+- Frontend layer: Streamlit dashboard that reads from the FastAPI backend
 
 ## Project structure
 
@@ -26,7 +26,7 @@ This repository contains a Streamlit dashboard for evaluating how an LLM-based r
 
 - CSV files are loaded into PostgreSQL during database initialization.
 - The Python service layer reads from those tables using SQLAlchemy.
-- The Streamlit app uses the same SQLAlchemy layer to render recruitment effectiveness metrics and model comparisons.
+- The Streamlit app calls the FastAPI endpoints to render recruitment effectiveness metrics and model comparisons.
 
 ## Notes
 
