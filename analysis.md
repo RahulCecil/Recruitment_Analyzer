@@ -93,7 +93,3 @@ These are model-performance disparities by job family, not a definitive fairness
 3. The Healthcare rule-score distribution is anomalous and should be investigated first. Check feature availability, family-specific normalization, and rule thresholds for Healthcare jobs.
 4. Re-evaluate thresholds separately from accuracy. Report precision-recall trade-offs, calibration, and family-level false-positive and false-negative rates rather than relying on one global 0.5 threshold.
 5. Treat recruiter decisions as a noisy label. A future audit should include independent review or outcome-based validation, and should stratify by country, seniority, model version, and job family together.
-
-## Reproducibility and data-quality notes
-
-The backend now exposes the metric definitions used here through `/api/overview/kpis`, including confusion matrices, balanced accuracy, MCC, and Wilson intervals. Re-run the repository validation script after changing the CSV inputs or database view. The dataset contains a clear rule-configuration artifact: every Healthcare application is labeled `low` by the rule scorer, so the Healthcare result should be treated as a configuration/data-generation defect until independently verified.

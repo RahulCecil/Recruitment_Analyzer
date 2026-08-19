@@ -53,12 +53,14 @@ def classifier_metrics(rows: list[dict[str, object]], score_key: str) -> dict[st
 
 def main() -> None:
     applications = read_csv("applications.csv")
-    candidates = {row["candidate_id"]: row for row in read_csv("candidates.csv")}
-    jobs = {row["job_id"]: row for row in read_csv("jobs.csv")}
+    candidate_rows = read_csv("candidates.csv")
+    job_rows = read_csv("jobs.csv")
+    candidates = {row["candidate_id"]: row for row in candidate_rows}
+    jobs = {row["job_id"]: row for row in job_rows}
 
     assert len(applications) == len({row["application_id"] for row in applications})
-    assert len(candidates) == len(read_csv("candidates.csv"))
-    assert len(jobs) == len(read_csv("jobs.csv"))
+    assert len(candidates) == len(candidate_rows)
+    assert len(jobs) == len(job_rows)
 
     evaluated = []
     for application in applications:
@@ -66,7 +68,8 @@ def main() -> None:
         assert application["job_id"] in jobs
         if not application["recruiter_decision"]:
             continue
-        assert application["rule_score"] and application["llm_score"]
+        assert application["rule_score"] is not None
+        assert application["llm_score"] is not None
         evaluated.append(
             {
                 "outcome": int(
