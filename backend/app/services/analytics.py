@@ -4,11 +4,23 @@ from decimal import Decimal
 from math import sqrt
 from typing import Any
 
-from sqlalchemy import Column, Float, Integer, Numeric, String, Table, case, cast, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import (
+    Column,
+    Float,
+    Integer,
+    Numeric,
+    String,
+    Table,
+    case,
+    cast,
+    exists,
+    func,
+    select,
+)
+from sqlalchemy.orm import Session, aliased
 
 from app.db.base import Base
-from app.db.models import Application, RecruiterEvent
+from app.db.models import Application, Candidate, Job, RecruiterEvent
 
 
 application_evaluations = Table(
@@ -220,6 +232,7 @@ def segment_analytics(
     country: str | None,
     model_version: str | None,
     min_profile_completeness: float,
+    threshold: float,
 ) -> list[dict[str, Any]]:
     view = application_evaluations
     statement = select(
@@ -230,17 +243,17 @@ def segment_analytics(
         _rounded_average(view.c.score_delta).label("avg_disagreement_delta"),
         _rounded_average(view.c.is_positive_outcome).label("positive_outcome_rate"),
         _rounded_average(
-            case((view.c.rule_score >= 0.5, 1), else_=0)
+            case((view.c.rule_score >= threshold, 1), else_=0)
         ).label("rule_positive_rate"),
         _rounded_average(
-            case((view.c.llm_score_norm >= 0.5, 1), else_=0)
+            case((view.c.llm_score_norm >= threshold, 1), else_=0)
         ).label("llm_positive_rate"),
         _rounded_average(
             case(
                 (
                     (
-                        ((view.c.rule_score >= 0.5) & (view.c.is_positive_outcome == 1))
-                        | ((view.c.rule_score < 0.5) & (view.c.is_positive_outcome == 0))
+                        ((view.c.rule_score >= threshold) & (view.c.is_positive_outcome == 1))
+                        | ((view.c.rule_score < threshold) & (view.c.is_positive_outcome == 0))
                     ),
                     1,
                 ),
@@ -251,8 +264,8 @@ def segment_analytics(
             case(
                 (
                     (
-                        ((view.c.llm_score_norm >= 0.5) & (view.c.is_positive_outcome == 1))
-                        | ((view.c.llm_score_norm < 0.5) & (view.c.is_positive_outcome == 0))
+                        ((view.c.llm_score_norm >= threshold) & (view.c.is_positive_outcome == 1))
+                        | ((view.c.llm_score_norm < threshold) & (view.c.is_positive_outcome == 0))
                     ),
                     1,
                 ),
@@ -319,3 +332,119 @@ def recruiter_behavior(db: Session) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def anomaly_metrics(db: Session) -> dict[str, Any]:
+    healthcare_rule_positives = db.scalar(
+        select(func.count(Application.application_id))
+        .join(Job, Application.job_id == Job.job_id)
+        .where(Job.job_family == "Healthcare", Application.rule_score >= 0.5)
+    ) or 0
+
+    experience_rows = db.execute(
+        select(
+            Job.seniority,
+            func.avg(Candidate.years_experience).label("average_years_experience"),
+        )
+        .select_from(Application)
+        .join(Job, Application.job_id == Job.job_id)
+        .join(Candidate, Application.candidate_id == Candidate.candidate_id)
+        .where(Job.seniority.in_(("junior", "mid", "senior")))
+        .group_by(Job.seniority)
+    ).mappings().all()
+    experience_seniority_mismatch = {
+        seniority: 0.0 for seniority in ("junior", "mid", "senior")
+    }
+    for row in experience_rows:
+        experience_seniority_mismatch[row["seniority"]] = round(
+            float(row["average_years_experience"] or 0.0), 3
+        )
+
+    profile_completeness_llm_corr = db.scalar(
+        select(func.corr(Candidate.profile_completeness, Application.llm_score))
+        .select_from(Application)
+        .join(Candidate, Application.candidate_id == Candidate.candidate_id)
+        .where(
+            Candidate.profile_completeness.is_not(None),
+            Application.llm_score.is_not(None),
+        )
+    )
+
+    valid_preference_count = db.scalar(
+        select(func.count(Application.application_id))
+        .select_from(Application)
+        .join(Job, Application.job_id == Job.job_id)
+        .join(Candidate, Application.candidate_id == Candidate.candidate_id)
+        .where(
+            Job.job_family.is_not(None),
+            Candidate.preferred_job_family.is_not(None),
+        )
+    ) or 0
+    preference_mismatch_count = db.scalar(
+        select(func.count(Application.application_id))
+        .select_from(Application)
+        .join(Job, Application.job_id == Job.job_id)
+        .join(Candidate, Application.candidate_id == Candidate.candidate_id)
+        .where(
+            Job.job_family.is_not(None),
+            Candidate.preferred_job_family.is_not(None),
+            Job.job_family != Candidate.preferred_job_family,
+        )
+    ) or 0
+
+    return {
+        "healthcare_rule_positives": int(healthcare_rule_positives),
+        "experience_seniority_mismatch": experience_seniority_mismatch,
+        "profile_completeness_llm_corr": round(
+            float(profile_completeness_llm_corr or 0.0), 3
+        ),
+        "preference_mismatch_rate": round(
+            preference_mismatch_count / valid_preference_count
+            if valid_preference_count
+            else 0.0,
+            3,
+        ),
+    }
+
+
+def funnel_violations(db: Session) -> dict[str, int]:
+    shortlisted_event = aliased(RecruiterEvent)
+    opened_event = aliased(RecruiterEvent)
+    shortlisted_without_open = db.scalar(
+        select(func.count(func.distinct(shortlisted_event.application_id)))
+        .select_from(shortlisted_event)
+        .where(
+            shortlisted_event.event_type == "shortlisted",
+            ~exists(
+                select(opened_event.event_id).where(
+                    opened_event.application_id == shortlisted_event.application_id,
+                    opened_event.event_type == "profile_opened",
+                )
+            ),
+        )
+    ) or 0
+
+    hired_without_shortlist = db.scalar(
+        select(func.count(Application.application_id)).where(
+            Application.recruiter_decision == "hired",
+            ~exists(
+                select(RecruiterEvent.event_id).where(
+                    RecruiterEvent.application_id == Application.application_id,
+                    RecruiterEvent.event_type == "shortlisted",
+                )
+            ),
+        )
+    ) or 0
+    apps_with_zero_events = db.scalar(
+        select(func.count(Application.application_id))
+        .outerjoin(
+            RecruiterEvent,
+            RecruiterEvent.application_id == Application.application_id,
+        )
+        .where(RecruiterEvent.event_id.is_(None))
+    ) or 0
+    return {
+        "shortlisted_without_open": int(shortlisted_without_open),
+        "hired_without_shortlist": int(hired_without_shortlist),
+        "apps_with_zero_events": int(apps_with_zero_events),
+    }

@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.analytics import (
+    anomaly_metrics,
     disagreements,
+    funnel_violations,
     model_versions,
     overview_distributions,
     overview_kpis,
@@ -53,10 +55,11 @@ def read_segment_analytics(
     country: str | None = None,
     model_version: str | None = None,
     min_profile_completeness: float = Query(0.0, ge=0.0, le=1.0),
+    threshold: float = Query(0.5, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     return segment_analytics(
-        db, job_family, country, model_version, min_profile_completeness
+        db, job_family, country, model_version, min_profile_completeness, threshold
     )
 
 
@@ -76,3 +79,13 @@ def read_disagreements(
 @app.get("/api/recruiter/behavior")
 def read_recruiter_behavior(db: Session = Depends(get_db)) -> list[dict]:
     return recruiter_behavior(db)
+
+
+@app.get("/api/anomalies/metrics")
+def read_anomaly_metrics(db: Session = Depends(get_db)) -> dict:
+    return anomaly_metrics(db)
+
+
+@app.get("/api/recruiter/funnel-violations")
+def read_funnel_violations(db: Session = Depends(get_db)) -> dict[str, int]:
+    return funnel_violations(db)

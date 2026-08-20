@@ -5,12 +5,11 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Environment configuration
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
 
 st.set_page_config(
-    page_title="AI Match Quality Dashboard",
-    page_icon="🎯",
+    page_title="AI Match Quality & Data Integrity Dashboard",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -30,16 +29,21 @@ def fetch_json(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
         return None
 
 
-st.title("🎯 AI Match Quality & Alignment Dashboard")
+st.title("⚡ AI Match Quality & Data Integrity Dashboard")
 st.caption(
-    "Evaluation of Rule-based Scorer vs. LLM Scorer performance against recruiter ground truth."
+    "Evaluation of Rule-based Scorer vs. LLM Scorer performance, recruiter workflows, and synthetic data health."
 )
 
 # ------------------------------------------------------------------------------
 # TAB DEFINITIONS
 # ------------------------------------------------------------------------------
-tab_overview, tab_drilldown, tab_behavior = st.tabs(
-    ["📊 Executive Overview", "🔍 Segment Drill-Down", "👁️ Recruiter Behavior"]
+tab_overview, tab_drilldown, tab_behavior, tab_anomalies = st.tabs(
+    [
+        "📊 Executive Overview",
+        "🔬 Segment Drill-Down",
+        "🤝 Recruiter Behavior",
+        "🚨 Data Integrity & Anomalies",
+    ]
 )
 
 # ==============================================================================
@@ -101,8 +105,6 @@ with tab_overview:
 
     with col_left:
         st.subheader("Score Distribution by Recruiter Decision")
-        st.caption("Do higher scores correlate with hired/interviewed decisions?")
-
         dist_data = fetch_json("/api/overview/distributions")
         if dist_data:
             df_dist = pd.DataFrame(dist_data)
@@ -122,10 +124,6 @@ with tab_overview:
 
     with col_right:
         st.subheader("Model-Version Comparison")
-        st.caption(
-            "Version-level differences are observational and may reflect different application mixes."
-        )
-
         version_data = fetch_json("/api/overview/model-versions")
         if version_data:
             df_version = pd.DataFrame(version_data)
@@ -140,34 +138,20 @@ with tab_overview:
 
 
 # ==============================================================================
-# TAB 2: SEGMENT DRILL-DOWN (SYSTEMATIC FLAW FINDER)
+# TAB 2: SEGMENT DRILL-DOWN
 # ==============================================================================
 with tab_drilldown:
     st.header("Segment Failure Analysis")
-    st.caption(
-        "Isolate systematic failures across job families, countries, and profile completeness levels."
-    )
 
-    # Global Filters for Drill-Down
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     job_family = f_col1.selectbox(
         "Job Family",
-        [
-            "All",
-            "IT",
-            "Logistics",
-            "Manufacturing",
-            "Healthcare",
-            "Office & Admin",
-        ],
+        ["All", "IT", "Logistics", "Manufacturing", "Healthcare", "Office & Admin"],
     )
     country = f_col2.selectbox("Country", ["All", "DE", "AT"])
     model_version = f_col3.selectbox("LLM Model Version", ["All", "v1", "v2"])
-    min_completeness = f_col4.slider(
-        "Min Profile Completeness", 0.0, 1.0, 0.0, 0.1
-    )
+    min_completeness = f_col4.slider("Min Profile Completeness", 0.0, 1.0, 0.0, 0.1)
 
-    # Build query parameters dictionary
     query_params = {}
     if job_family != "All":
         query_params["job_family"] = job_family
@@ -192,13 +176,7 @@ with tab_drilldown:
     st.divider()
 
     st.subheader("Disagreement Case Inspector")
-    st.caption(
-        "Individual applications with a score gap greater than 0.4; this is separate from binary classification disagreement."
-    )
-
-    disagree_data = fetch_json(
-        "/api/segments/disagreements", params=query_params
-    )
+    disagree_data = fetch_json("/api/segments/disagreements", params=query_params)
 
     if disagree_data:
         df_disagree = pd.DataFrame(disagree_data)
@@ -211,16 +189,36 @@ with tab_drilldown:
 # TAB 3: RECRUITER BEHAVIOR & INTERACTION ANALYSIS
 # ==============================================================================
 with tab_behavior:
-    st.header("Recruiter Interaction Analytics")
-    st.caption(
-        "How recruiters interact with AI scores and whether score exposure affects hiring choices."
+    st.header("Recruiter Interaction & Workflow Funnel")
+
+    violations = fetch_json("/api/recruiter/funnel-violations") or {}
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric(
+        "Shortlisted Without Opening Profile",
+        violations.get("shortlisted_without_open", "N/A"),
+        delta="Funnel Violation",
+        delta_color="inverse",
     )
+    c2.metric(
+        "Hired Without Shortlist Event",
+        violations.get("hired_without_shortlist", "N/A"),
+        delta="Missing Step",
+        delta_color="inverse",
+    )
+    c3.metric(
+        "Applications With 0 Events",
+        violations.get("apps_with_zero_events", "N/A"),
+        delta="Untracked",
+        delta_color="inverse",
+    )
+
+    st.divider()
 
     behavior_data = fetch_json("/api/recruiter/behavior")
 
     if behavior_data:
         df_beh = pd.DataFrame(behavior_data)
-
         b_col1, b_col2 = st.columns([1, 2])
 
         with b_col1:
@@ -234,3 +232,78 @@ with tab_behavior:
             )
     else:
         st.info("No recruiter behavior event data available.")
+
+
+# ==============================================================================
+# TAB 4: DATA INTEGRITY & SYSTEMATIC ANOMALIES
+# ==============================================================================
+with tab_anomalies:
+    st.header("🚨 Systematic Errors & Synthetic Data Anomalies")
+    st.caption(
+        "Audit trail of structural flaws, scoring bugs, and synthetic distribution signatures."
+    )
+
+    # Fetch live anomaly metrics from API
+    anomalies = fetch_json("/api/anomalies/metrics") or {}
+    healthcare_positives = anomalies.get("healthcare_rule_positives")
+    healthcare_label = (
+        str(healthcare_positives) if healthcare_positives is not None else "N/A"
+    )
+
+    a_col1, a_col2, a_col3 = st.columns(3)
+
+    a_col1.error("Healthcare Rule Score Bug")
+    a_col1.write(
+        f"The rule engine assigned **{healthcare_label} positive predictions** "
+        "to Healthcare jobs despite a ~50.8% positive ground-truth rate."
+    )
+
+    a_col2.warning("Seniority / Experience Inversion")
+    exp_mismatch = anomalies.get("experience_seniority_mismatch", {})
+    junior_exp = exp_mismatch.get("junior")
+    senior_exp = exp_mismatch.get("senior")
+    junior_label = f"{junior_exp:.2f} yrs" if junior_exp is not None else "N/A"
+    senior_label = f"{senior_exp:.2f} yrs" if senior_exp is not None else "N/A"
+    a_col2.write(
+        f"Junior avg exp: **{junior_label}** | "
+        f"Senior avg exp: **{senior_label}**. "
+        "Candidate experience was unmapped during application generation."
+    )
+
+    a_col3.warning("Profile Completeness Paradox")
+    corr_val = anomalies.get("profile_completeness_llm_corr")
+    corr_label = f"{corr_val:.3f}" if corr_val is not None else "N/A"
+    a_col3.write(
+        f"LLM score correlates **negatively ({corr_label})** with `profile_completeness`, "
+        "indicating hallucinations or prompt formatting bugs on sparse candidate profiles."
+    )
+
+    st.divider()
+
+    st.subheader("Data Health Diagnostics Summary")
+
+    mismatch_rate = anomalies.get("preference_mismatch_rate")
+    mismatch_label = f"{mismatch_rate * 100:.1f}%" if mismatch_rate is not None else "N/A"
+
+    anomaly_data = [
+        {
+            "Anomaly": "Healthcare Rule Collapse",
+            "Observed Value": f"{healthcare_label} Positive Predictions",
+            "Expected Value": "~630 Positive Outcomes",
+            "Category": "Scoring Pipeline Bug",
+        },
+        {
+            "Anomaly": "Job Family Preference Mismatch",
+            "Observed Value": f"{mismatch_label} Out-of-Preference Apps",
+            "Expected Value": "< 20.0%",
+            "Category": "Synthetic Generator Artifact",
+        },
+        {
+            "Anomaly": "Profile Completeness Correlation",
+            "Observed Value": f"r = {corr_label}",
+            "Expected Value": "r > +0.300",
+            "Category": "Prompt / Feature Bug",
+        },
+    ]
+
+    st.dataframe(pd.DataFrame(anomaly_data), use_container_width=True, hide_index=True)

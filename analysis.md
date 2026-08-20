@@ -4,6 +4,8 @@
 
 This analysis uses the CSV files in `Tables/` as of 2026-08-19. Applications were joined to jobs on `job_id` and candidates on `candidate_id`. The evaluated population contains applications with a non-null `recruiter_decision`; 504 pending applications are excluded.
 
+The report numbers below are recomputed from the source CSV precision. The PostgreSQL schema currently stores `rule_score` as `NUMERIC(3,2)`, which rounds the CSV's three-decimal rule scores before backend evaluation. This changes the 0.5 classification for a small number of rows, so the CSV report and database-backed dashboard can differ slightly until the schema is migrated to preserve three decimals.
+
 Ground truth is the same operational definition used by the backend:
 
 - Positive: `interviewed` or `hired`
@@ -86,10 +88,23 @@ The LLM does not show the same collapse, but it is also not uniform: its accurac
 
 These are model-performance disparities by job family, not a definitive fairness finding about people. The data does not include protected characteristics, and the recruiter decision is itself an imperfect and potentially biased proxy for ground truth. Family sample sizes are also uneven, so these comparisons should be followed by confidence intervals and a controlled error analysis before changing production thresholds.
 
+## Dashboard consistency findings
+
+The Streamlit dashboard now reads the anomaly metrics and recruiter funnel violations from the FastAPI endpoints rather than embedding the observed values in the anomaly cards. The Healthcare comparison is correctly stated as approximately 630 positive recruiter outcomes (50.8% of 1,239 evaluated Healthcare applications), not 692 positive predictions. When the funnel endpoint is unavailable, the cards show `N/A` instead of presenting historical counts as live data.
+
+The segment drill-down supports the backend's dynamic `threshold` parameter through the API, but the current Streamlit controls do not expose a threshold selector; they continue to use the backend default of 0.5. Model-version filters display `v1` and `v2` while the stored values are `scorer-v1` and `scorer-v2`; the backend maps those UI aliases explicitly.
+
+The dashboard's published metrics should therefore be interpreted as database-backed metrics, while this report is a source-CSV audit. Aligning the database score precision and adding a visible threshold control are the next consistency improvements.
+
 ## Conclusions and next checks
 
 1. Against the current recruiter-derived ground truth, the rule system is more accurate: **65.03% versus 62.05%** for the LLM.
 2. At the evaluated threshold, the LLM has substantially higher recall (**90.44%**) but much lower specificity (**30.88%**), making it more appropriate for a recall-first workflow unless its threshold is recalibrated.
 3. The Healthcare rule-score distribution is anomalous and should be investigated first. Check feature availability, family-specific normalization, and rule thresholds for Healthcare jobs.
-4. Re-evaluate thresholds separately from accuracy. Report precision-recall trade-offs, calibration, and family-level false-positive and false-negative rates rather than relying on one global 0.5 threshold.
-5. Treat recruiter decisions as a noisy label. A future audit should include independent review or outcome-based validation, and should stratify by country, seniority, model version, and job family together.
+4. The Healthcare anomaly is a prediction collapse, not merely a difference in accuracy: all **1,239** Healthcare applications receive negative rule predictions, while approximately **630** have positive recruiter outcomes. This makes the family unsuitable for unqualified use of the current rule score.
+5. Candidate experience is not aligned with job seniority: average experience is **8.77 years** for junior roles, **8.80 years** for mid-level roles, and **8.47 years** for senior roles. This inversion is evidence of a job-assignment or synthetic-data mapping problem and should be fixed before using seniority for segmentation or fairness analysis.
+6. The negative correlation between profile completeness and normalized LLM score (**r = -0.152**) is a data or scoring quality warning. Sparse profiles should be checked for prompt, feature-extraction, and missing-value handling effects before interpreting LLM scores as candidate quality.
+7. Job-family preferences are inconsistent with assigned jobs in **79.2%** of applications. This is a major synthetic-generator artifact and means preference-based outcome comparisons should not be treated as representative of applicant intent or job fit.
+8. The recruiter event trail contains measurable funnel breaks: **208** applications were shortlisted without a `profile_opened` event, **237** hired applications have no `shortlisted` event, and **109** applications have no recruiter events at all. These counts indicate workflow observability and process-integrity problems; they should be resolved before using event data to evaluate recruiter behavior.
+9. Re-evaluate thresholds separately from accuracy. Report precision-recall trade-offs, calibration, and family-level false-positive and false-negative rates rather than relying on one global 0.5 threshold. The dashboard backend supports dynamic thresholds, but the current Streamlit controls still use the default until a visible threshold control is added.
+10. Treat recruiter decisions as a noisy label. A future audit should include independent review or outcome-based validation, and should stratify by country, seniority, model version, and job family together. The anomaly values identify where to investigate; they do not by themselves establish the underlying causal bug.
