@@ -22,6 +22,13 @@ This repository contains a Streamlit dashboard for evaluating how an LLM-based r
 2. Open the dashboard in the browser:
    http://localhost:8501
 
+For an existing PostgreSQL volume created before the rule-score precision fix, apply
+the migration once:
+
+```text
+Get-Content -Raw .\db\migrate_rule_score_precision.sql | docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d recruitment_db
+```
+
 ## Data flow
 
 - CSV files are loaded into PostgreSQL during database initialization.
