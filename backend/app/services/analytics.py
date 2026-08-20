@@ -44,7 +44,7 @@ application_evaluations = Table(
 
 
 def _rounded_average(column: Any) -> Any:
-    return func.round(cast(func.avg(column), Numeric(10, 3)), 3)
+    return func.round(cast(func.avg(column), Numeric(12, 4)), 4)
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
@@ -215,11 +215,13 @@ def _segment_filters(
     if country:
         statement = statement.where(view.c.job_country == country)
     if model_version:
-        normalized_version = {
-            "v1": "scorer-v1",
-            "v2": "scorer-v2",
-        }.get(model_version, model_version)
-        statement = statement.where(view.c.llm_model_version == normalized_version)
+        normalized_version = model_version.strip().lower()
+        short_version = normalized_version.removeprefix("scorer-")
+        statement = statement.where(
+            func.lower(view.c.llm_model_version).in_(
+                (short_version, f"scorer-{short_version}")
+            )
+        )
     return statement.where(
         view.c.profile_completeness >= min_profile_completeness,
         view.c.recruiter_decision.is_not(None),

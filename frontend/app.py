@@ -151,6 +151,7 @@ with tab_drilldown:
     country = f_col2.selectbox("Country", ["All", "DE", "AT"])
     model_version = f_col3.selectbox("LLM Model Version", ["All", "v1", "v2"])
     min_completeness = f_col4.slider("Min Profile Completeness", 0.0, 1.0, 0.0, 0.1)
+    threshold = st.slider("Classification Threshold", 0.0, 1.0, 0.5, 0.05)
 
     query_params = {}
     if job_family != "All":
@@ -161,6 +162,7 @@ with tab_drilldown:
         query_params["model_version"] = model_version
     if min_completeness > 0.0:
         query_params["min_profile_completeness"] = min_completeness
+    query_params["threshold"] = threshold
 
     st.divider()
 
@@ -191,7 +193,8 @@ with tab_drilldown:
 with tab_behavior:
     st.header("Recruiter Interaction & Workflow Funnel")
 
-    violations = fetch_json("/api/recruiter/funnel-violations") or {}
+    violations_response = fetch_json("/api/recruiter/funnel-violations")
+    violations = violations_response if isinstance(violations_response, dict) else {}
 
     c1, c2, c3 = st.columns(3)
     c1.metric(

@@ -35,7 +35,7 @@ class Application(Base):
         String(50), ForeignKey("candidates.candidate_id"), nullable=False
     )
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False)
-    rule_score: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    rule_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     rule_fit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     llm_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     llm_model_version: Mapped[str] = mapped_column(String(20), nullable=False)

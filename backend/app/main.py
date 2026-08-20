@@ -24,12 +24,12 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/summary")
+@app.get("/api/summary", deprecated=True)
 def read_summary(db: Session = Depends(get_db)) -> dict:
     return compute_summary(db)
 
 
-@app.get("/api/tool-performance")
+@app.get("/api/tool-performance", deprecated=True)
 def read_tool_performance(db: Session = Depends(get_db)) -> list[dict]:
     return compare_tool_performance(db)
 

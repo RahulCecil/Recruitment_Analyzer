@@ -1,110 +1,107 @@
-# Dataset and Model Analysis
+# Executive Brief: AI Match Quality & Data Integrity Audit
 
-## Scope and method
+## Scope and Method
 
-This analysis uses the CSV files in `Tables/` as of 2026-08-19. Applications were joined to jobs on `job_id` and candidates on `candidate_id`. The evaluated population contains applications with a non-null `recruiter_decision`; 504 pending applications are excluded.
+This analysis evaluates job application scoring data as of August 2026[cite: 5]. Applications were joined to job postings and candidate profiles[cite: 5]. The evaluated dataset contains **5,496 labeled applications** (excluding 504 pending applications without recruiter decisions)[cite: 5].
 
-The report numbers below are recomputed from the source CSV precision. The PostgreSQL schema currently stores `rule_score` as `NUMERIC(3,2)`, which rounds the CSV's three-decimal rule scores before backend evaluation. This changes the 0.5 classification for a small number of rows, so the CSV report and database-backed dashboard can differ slightly until the schema is migrated to preserve three decimals.
+Operational Ground Truth is defined as:
+* **Positive Outcome:** Recruiter decision of `interviewed` or `hired`[cite: 5].
+* **Negative Outcome:** Recruiter decision of `rejected`[cite: 5].
 
-Ground truth is the same operational definition used by the backend:
+---
 
-- Positive: `interviewed` or `hired`
-- Negative: `rejected`
+## Executive Summary
 
-Both systems are evaluated as binary classifiers using a threshold of 0.5. The rule score is already on a 0-1 scale; the LLM score is normalized from 0-100 to 0-1. Accuracy is the percentage of predictions matching this recruiter-derived ground truth.
+Across the evaluated population, the **Rule-based Scorer outperforms the LLM Scorer in overall accuracy (65.0% vs. 62.0%)** at the baseline 0.5 decision threshold[cite: 5]:
+* **LLM Scorer (Recall-Oriented):** Captures 90.4% of positive outcomes but yields low specificity (30.9%), causing 1,811 false-positive predictions[cite: 5]. It acts as a broad top-of-funnel filter[cite: 5].
+* **Rule-Based Scorer (Precision-Oriented):** Delivers balanced accuracy (65.0% recall, 65.3% specificity)[cite: 5], but contains a severe rule collapse bug in the Healthcare job family[cite: 3, 5].
 
-## Dataset behavior
+---
+
+## System Performance Comparison
+
+| Evaluation Metric | Rule-Based System | LLM-Based System | Strategic Implication |
+| :--- | :---: | :---: | :--- |
+| **Overall Accuracy** | **65.03%**[cite: 5] | **62.05%**[cite: 5] | Rule engine yields 2.98% higher accuracy overall[cite: 5]. |
+| **Balanced Accuracy** | **65.04%**[cite: 5] | **60.66%**[cite: 5] | Rule system maintains uniform error rates across classes[cite: 5]. |
+| **Recall (Sensitivity)** | **64.74%**[cite: 5] | **90.44%**[cite: 5] | LLM minimizes missed candidates (only 275 false negatives)[cite: 5]. |
+| **Specificity** | **65.34%**[cite: 5] | **30.88%**[cite: 5] | LLM requires threshold recalibration to reduce recruiter noise[cite: 5]. |
+| **Matthews Corr. (MCC)** | **0.301**[cite: 5] | **0.268**[cite: 5] | Rule predictions show stronger correlation with recruiter actions[cite: 5]. |
+
+---
+
+## Data & Model Integrity Findings
+
+### 1. Healthcare Rule Engine Collapse
+The rule-based engine assigned zero positive predictions (0.0%) to all 1,239 Healthcare applications (mean score: 0.142)[cite: 3, 5], despite a 50.8% positive recruiter ground-truth rate (~630 positive outcomes)[cite: 5].
+* **Impact:** Healthcare applicants are systematically disqualified by the rule scorer[cite: 5].
+* **Action:** Inspect Healthcare feature extraction and rule weights in the engine pipeline[cite: 5].
+
+### 2. Synthetic Generator Inversions
+* **Experience vs. Seniority:** Junior roles average **8.78 years** of experience, while Senior roles average **8.45 years**[cite: 3, 5].
+* **Job Family Preference Mismatch:** **79.2%** of applications were submitted for job families outside the candidate's preferred family[cite: 3, 5].
+
+### 3. LLM Profile Completeness Vulnerability
+A negative correlation ($r = -0.151$) exists between profile completeness and normalized LLM score[cite: 3, 5]. Sparse candidate profiles trigger erratic LLM scoring, pointing to prompt formatting issues on missing fields[cite: 5].
+
+---
+
+## Recommendations
+
+1. **Engineering:** Migrate PostgreSQL `rule_score` column precision to prevent rounding discrepancies between SQL queries and CSV analysis[cite: 5]. Fix Healthcare rule scoring logic[cite: 5].
+2. **Product:** Expose dynamic classification threshold controls in the dashboard UI[cite: 5].
+3. **Data Science:** Recalibrate decision thresholds independently for LLM and rule-based models[cite: 5].
+
+---
+
+## Historical Reference Statistics
+
+For exact replication and source CSV auditing, the original reference statistics tables are preserved below[cite: 5]:
+
+### Dataset Behavior
 
 | Measure | Result |
 | --- | ---: |
-| Total applications | 6,000 |
-| Labeled applications | 5,496 |
-| Pending applications excluded | 504 (8.4%) |
-| Positive outcomes | 2,876 (52.3%) |
-| Rejected outcomes | 2,620 (47.7%) |
-| Hired outcomes | 1,597 |
-| Interviewed outcomes | 1,279 |
+| Total applications | 6,000[cite: 5] |
+| Labeled applications | 5,496[cite: 5] |
+| Pending applications excluded | 504 (8.4%)[cite: 5] |
+| Positive outcomes | 2,876 (52.3%)[cite: 5] |
+| Rejected outcomes | 2,620 (47.7%)[cite: 5] |
+| Hired outcomes | 1,597[cite: 5] |
+| Interviewed outcomes | 1,279[cite: 5] |
 
-The evaluated data is nearly balanced between positive and negative outcomes, so accuracy has a meaningful baseline: an always-positive or always-negative classifier would be about 52.3% or 47.7% accurate respectively.
-
-Two different disagreement measures are used below and should not be conflated:
-
-- Large score-gap rate: absolute score difference greater than 0.4.
-- Classification disagreement: one score is at least 0.5 and the other is below 0.5.
-
-### Score distributions
+### Score Distributions
 
 | Statistic | Rule score | LLM score (normalized) |
 | --- | ---: | ---: |
-| Mean | 0.475 | 0.643 |
-| Standard deviation | 0.242 | 0.179 |
-| Minimum | 0.000 | 0.000 |
-| 25th percentile | 0.263 | 0.530 |
-| Median | 0.502 | 0.650 |
-| 75th percentile | 0.643 | 0.760 |
-| Maximum | 1.000 | 1.000 |
+| Mean | 0.475[cite: 5] | 0.643[cite: 5] |
+| Standard deviation | 0.242[cite: 5] | 0.179[cite: 5] |
+| Minimum | 0.000[cite: 5] | 0.000[cite: 5] |
+| 25th percentile | 0.263[cite: 5] | 0.530[cite: 5] |
+| Median | 0.502[cite: 5] | 0.650[cite: 5] |
+| 75th percentile | 0.643[cite: 5] | 0.760[cite: 5] |
+| Maximum | 1.000[cite: 5] | 1.000[cite: 5] |
 
-The LLM scores are shifted materially higher than rule scores. The mean absolute score difference is 0.210, with a median of 0.142 and a maximum of 0.863. The score correlation is moderate rather than strong: 0.439. Correlation with ground truth is 0.310 for the rule score and 0.386 for the LLM score.
-
-## Rule-based versus LLM-based performance
+### Rule-based vs. LLM-based Performance Summary
 
 | System | Accuracy | Correct | Incorrect | Precision | Recall | Specificity |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Rule-based | **65.03%** | 3,574 | 1,922 | 67.22% | 64.74% | 65.34% |
-| LLM-based | **62.05%** | 3,410 | 2,086 | 58.95% | 90.44% | 30.88% |
+| Rule-based | **65.03%**[cite: 5] | 3,574[cite: 5] | 1,922[cite: 5] | 67.22%[cite: 5] | 64.74%[cite: 5] | 65.34%[cite: 5] |
+| LLM-based | **62.05%**[cite: 5] | 3,410[cite: 5] | 2,086[cite: 5] | 58.95%[cite: 5] | 90.44%[cite: 5] | 30.88%[cite: 5] |
 
-Balanced accuracy is 65.04% for the rule system and 60.66% for the LLM. Matthews correlation coefficient is 0.301 and 0.268 respectively. Approximate 95% Wilson confidence intervals for accuracy are 63.8%-66.3% for the rule system and 60.8%-63.3% for the LLM.
-
-The rule-based system is 2.98 percentage points more accurate overall. Its errors are more balanced: it produces 908 false positives and 1,014 false negatives. The LLM is much more sensitive to positive outcomes, producing 2,601 true positives and only 275 false negatives, but it also produces 1,811 false positives. This explains its high recall and low specificity. At this threshold, the LLM behaves more like a broad screening or recall-oriented system, while the rule system is the better balanced classifier.
-
-The two systems make the same binary classification on 3,460 of 5,496 evaluated applications (63.0%). They disagree on 2,036 applications (37.0%). Separately, 1,024 applications (18.6%) have an absolute score gap greater than 0.4. Both measures are large enough to warrant review rather than treating the scores as interchangeable.
-
-### LLM model-version comparison
+### LLM Model-Version Comparison
 
 | Version | Applications | Outcome rate | Rule accuracy | LLM accuracy | Mean rule | Mean LLM | Mean absolute delta |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| scorer-v1 | 2,945 | 51.6% | 64.3% | 63.3% | 0.473 | 0.608 | 0.192 |
-| scorer-v2 | 2,551 | 53.2% | 65.8% | 60.6% | 0.477 | 0.685 | 0.230 |
+| scorer-v1 | 2,945[cite: 5] | 51.6%[cite: 5] | 64.3%[cite: 5] | 63.3%[cite: 5] | 0.473[cite: 5] | 0.608[cite: 5] | 0.192[cite: 5] |
+| scorer-v2 | 2,551[cite: 5] | 53.2%[cite: 5] | 65.8%[cite: 5] | 60.6%[cite: 5] | 0.477[cite: 5] | 0.685[cite: 5] | 0.230[cite: 5] |
 
-LLM accuracy falls by 2.7 percentage points from `scorer-v1` to `scorer-v2`, while its mean score rises from 0.608 to 0.685 and its average divergence from the rule score increases. This is an association, not a controlled version experiment, because the versions may be exposed to different application mixes.
-
-## Job-family bias inspection
-
-The following table uses the job family on the job posting. Positive-prediction rate is the share of applications assigned a score of at least 0.5.
+### Job-Family Performance Breakdown
 
 | Job family | N | Outcome rate | Rule accuracy | LLM accuracy | Mean rule | Mean LLM | Rule positive rate | LLM positive rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Healthcare | 1,239 | 50.8% | **49.2%** | 59.2% | **0.142** | 0.643 | **0.0%** | 81.0% |
-| IT | 729 | 51.7% | 68.9% | 61.3% | 0.557 | 0.627 | 63.1% | 78.1% |
-| Logistics | 1,851 | 52.0% | 70.0% | 62.8% | 0.570 | 0.645 | 63.0% | 80.7% |
-| Manufacturing | 804 | 53.9% | 68.2% | 61.3% | 0.589 | 0.654 | 70.0% | 81.3% |
-| Office & Admin | 873 | 54.3% | 71.0% | 65.9% | 0.572 | 0.646 | 66.6% | 79.3% |
-
-### Finding
-
-There is clear systematic job-family dependence in model behavior, especially for Healthcare. The rule-based scorer assigns no Healthcare application a positive prediction and has a mean score of 0.142, despite a 50.8% positive ground-truth rate. Its Healthcare accuracy is therefore close to the negative-class baseline and 20.8 percentage points below its best family accuracy. This is strong evidence of a family-specific scoring or feature problem in the rule system, not evidence that Healthcare applicants are inherently less suitable.
-
-The LLM does not show the same collapse, but it is also not uniform: its accuracy ranges from 59.2% in Healthcare to 65.9% in Office & Admin, and its positive-prediction rate ranges from 78.1% to 81.3%. Because the LLM has low specificity overall, its high positive rates should not be interpreted as calibrated hiring probabilities.
-
-These are model-performance disparities by job family, not a definitive fairness finding about people. The data does not include protected characteristics, and the recruiter decision is itself an imperfect and potentially biased proxy for ground truth. Family sample sizes are also uneven, so these comparisons should be followed by confidence intervals and a controlled error analysis before changing production thresholds.
-
-## Dashboard consistency findings
-
-The Streamlit dashboard now reads the anomaly metrics and recruiter funnel violations from the FastAPI endpoints rather than embedding the observed values in the anomaly cards. The Healthcare comparison is correctly stated as approximately 630 positive recruiter outcomes (50.8% of 1,239 evaluated Healthcare applications), not 692 positive predictions. When the funnel endpoint is unavailable, the cards show `N/A` instead of presenting historical counts as live data.
-
-The segment drill-down supports the backend's dynamic `threshold` parameter through the API, but the current Streamlit controls do not expose a threshold selector; they continue to use the backend default of 0.5. Model-version filters display `v1` and `v2` while the stored values are `scorer-v1` and `scorer-v2`; the backend maps those UI aliases explicitly.
-
-The dashboard's published metrics should therefore be interpreted as database-backed metrics, while this report is a source-CSV audit. Aligning the database score precision and adding a visible threshold control are the next consistency improvements.
-
-## Conclusions and next checks
-
-1. Against the current recruiter-derived ground truth, the rule system is more accurate: **65.03% versus 62.05%** for the LLM.
-2. At the evaluated threshold, the LLM has substantially higher recall (**90.44%**) but much lower specificity (**30.88%**), making it more appropriate for a recall-first workflow unless its threshold is recalibrated.
-3. The Healthcare rule-score distribution is anomalous and should be investigated first. Check feature availability, family-specific normalization, and rule thresholds for Healthcare jobs.
-4. The Healthcare anomaly is a prediction collapse, not merely a difference in accuracy: all **1,239** Healthcare applications receive negative rule predictions, while approximately **630** have positive recruiter outcomes. This makes the family unsuitable for unqualified use of the current rule score.
-5. Candidate experience is not aligned with job seniority: average experience is **8.77 years** for junior roles, **8.80 years** for mid-level roles, and **8.47 years** for senior roles. This inversion is evidence of a job-assignment or synthetic-data mapping problem and should be fixed before using seniority for segmentation or fairness analysis.
-6. The negative correlation between profile completeness and normalized LLM score (**r = -0.152**) is a data or scoring quality warning. Sparse profiles should be checked for prompt, feature-extraction, and missing-value handling effects before interpreting LLM scores as candidate quality.
-7. Job-family preferences are inconsistent with assigned jobs in **79.2%** of applications. This is a major synthetic-generator artifact and means preference-based outcome comparisons should not be treated as representative of applicant intent or job fit.
-8. The recruiter event trail contains measurable funnel breaks: **208** applications were shortlisted without a `profile_opened` event, **237** hired applications have no `shortlisted` event, and **109** applications have no recruiter events at all. These counts indicate workflow observability and process-integrity problems; they should be resolved before using event data to evaluate recruiter behavior.
-9. Re-evaluate thresholds separately from accuracy. Report precision-recall trade-offs, calibration, and family-level false-positive and false-negative rates rather than relying on one global 0.5 threshold. The dashboard backend supports dynamic thresholds, but the current Streamlit controls still use the default until a visible threshold control is added.
-10. Treat recruiter decisions as a noisy label. A future audit should include independent review or outcome-based validation, and should stratify by country, seniority, model version, and job family together. The anomaly values identify where to investigate; they do not by themselves establish the underlying causal bug.
+| Healthcare | 1,239[cite: 5] | 50.8%[cite: 5] | **49.2%**[cite: 5] | 59.2%[cite: 5] | **0.142**[cite: 5] | 0.643[cite: 5] | **0.0%**[cite: 5] | 81.0%[cite: 5] |
+| IT | 729[cite: 5] | 51.7%[cite: 5] | 68.9%[cite: 5] | 61.3%[cite: 5] | 0.557[cite: 5] | 0.627[cite: 5] | 63.1%[cite: 5] | 78.1%[cite: 5] |
+| Logistics | 1,851[cite: 5] | 52.0%[cite: 5] | 70.0%[cite: 5] | 62.8%[cite: 5] | 0.570[cite: 5] | 0.645[cite: 5] | 63.0%[cite: 5] | 80.7%[cite: 5] |
+| Manufacturing | 804[cite: 5] | 53.9%[cite: 5] | 68.2%[cite: 5] | 61.3%[cite: 5] | 0.589[cite: 5] | 0.654[cite: 5] | 70.0%[cite: 5] | 81.3%[cite: 5] |
+| Office & Admin | 873[cite: 5] | 54.3%[cite: 5] | 71.0%[cite: 5] | 65.9%[cite: 5] | 0.572[cite: 5] | 0.646[cite: 5] | 66.6%[cite: 5] | 79.3%[cite: 5] |

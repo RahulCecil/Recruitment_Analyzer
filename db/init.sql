@@ -21,7 +21,7 @@ CREATE TABLE applications (
     job_id VARCHAR(50) NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
     candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    rule_score NUMERIC(3, 2) CHECK (rule_score BETWEEN 0.0 AND 1.0),
+    rule_score NUMERIC(5, 4) CHECK (rule_score BETWEEN 0.0 AND 1.0),
     rule_fit VARCHAR(20) CHECK (rule_fit IN ('low', 'medium', 'good')),
     llm_score INT CHECK (llm_score BETWEEN 0 AND 100),
     llm_model_version VARCHAR(20) NOT NULL,
@@ -63,11 +63,11 @@ SELECT
     a.llm_model_version,
 
     -- Normalized scores (0.0 to 1.0 scale)
-    a.rule_score,
-    (a.llm_score / 100.0) AS llm_score_norm,
+    a.rule_score::double precision AS rule_score,
+    (a.llm_score / 100.0)::double precision AS llm_score_norm,
 
     -- Score divergence (Agreement metric)
-    ABS(a.rule_score - (a.llm_score / 100.0)) AS score_delta,
+    ABS(a.rule_score - (a.llm_score / 100.0))::double precision AS score_delta,
 
     -- Ground truth excludes pending decisions.
     a.recruiter_decision,
